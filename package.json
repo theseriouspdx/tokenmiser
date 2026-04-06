@@ -1,0 +1,17 @@
+{
+  "name": "tokenmiser",
+  "version": "1.0.0",
+  "description": "See where your AI API money goes. Point it at your OpenRouter account, get a cost dashboard in 30 seconds.",
+  "bin": {
+    "tokenmiser": "./cli.js"
+  },
+  "main": "cli.js",
+  "scripts": {
+    "start": "node cli.js"
+  },
+  "keywords": ["openrouter", "llm", "cost", "tokens", "optimization", "ai", "api"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
