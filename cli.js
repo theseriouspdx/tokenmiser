@@ -32,6 +32,7 @@ const { aggregate } = require('./lib/aggregate');
 const { getSubscriptionRecords, getTotalSubscriptionCost } = require('./lib/subscriptions');
 const { generateDashboard } = require('./lib/dashboard');
 const config = require('./lib/config');
+const { detectSubscriptions } = require('./lib/auto-subscriptions');
 
 const VERSION = '4.0.0';
 const OUTPUT_FILE = path.join(process.cwd(), 'tokenmiser-report.html');
@@ -197,14 +198,23 @@ async function main() {
     const data = aggregate(records, pricing);
     const localOnly = !hasApiSource && records.some((r) => r.estimated);
 
-    // Subscription data
-    const subRecords = getSubscriptionRecords(30);
-    const totalSubCost = getTotalSubscriptionCost(30);
+    // Subscription data — use manual config if available, otherwise auto-detect
     const cfg = config.readConfig();
     const budgets = cfg.budgets || [];
+    let subRecords = getSubscriptionRecords(30);
+    let totalSubCost = getTotalSubscriptionCost(30);
+    let subsAutoDetected = false;
+
+    if (subRecords.length === 0) {
+      // No manual subscriptions — try auto-detection from usage data
+      subRecords = detectSubscriptions(records);
+      totalSubCost = subRecords.reduce((s, r) => s + r.proratedCost, 0);
+      subsAutoDetected = subRecords.length > 0;
+    }
 
     if (subRecords.length > 0) {
-      process.stderr.write(`  ✓ Subscriptions                  ${fmtMoney(totalSubCost)} (${subRecords.length} active plans)\n\n`);
+      const label = subsAutoDetected ? 'Subscriptions (auto-detected)' : 'Subscriptions';
+      process.stderr.write(`  ✓ ${label.padEnd(28)} ${fmtMoney(totalSubCost)} (${subRecords.length} active plans)\n\n`);
     }
 
     if (records.length === 0 && subRecords.length === 0) {
