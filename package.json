@@ -1,7 +1,7 @@
 {
   "name": "tokenmiser",
-  "version": "3.0.0",
-  "description": "Auto-detect AI API spending across billing sources. Supports Claude Code logs, OpenRouter CSV imports, and deduplication.",
+  "version": "4.0.0",
+  "description": "Auto-detect AI API spending across all billing sources. Supports OpenRouter, Anthropic, OpenAI APIs, local CLI logs (Claude Code, Codex, Cline, Aider), CSV imports, subscription tracking, and interactive dashboard with 7 views.",
   "bin": {
     "tokenmiser": "./cli.js"
   },
