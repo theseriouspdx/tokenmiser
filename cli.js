@@ -276,7 +276,7 @@ function collectClaudeCodeLogs() {
 
   const jsonlFiles = [];
   try {
-    findJsonlFiles(projectsDir, jsonlFiles, 3);
+    findJsonlFiles(projectsDir, jsonlFiles, 5);
   } catch { return null; }
 
   if (jsonlFiles.length === 0) return null;
@@ -302,19 +302,23 @@ function collectClaudeCodeLogs() {
       for (const line of lines) {
         try {
           const entry = JSON.parse(line);
-          // Look for assistant messages with usage data
-          if (!entry.usage) continue;
+          // Claude Code stores usage inside entry.message.usage
+          const msg = entry.message || {};
+          const usage = msg.usage || entry.usage;
+          if (!usage) continue;
+          if (!usage.input_tokens && !usage.output_tokens && !usage.cache_creation_input_tokens) continue;
+
           const ts = entry.timestamp || entry.createdAt;
           if (!ts) continue;
           const time = typeof ts === 'number' ? ts : new Date(ts).getTime();
           if (time < thirtyDaysAgo) continue;
 
           const date = new Date(time).toISOString().slice(0, 10);
-          const model = entry.model || 'claude-unknown';
-          const input = entry.usage.input_tokens || 0;
-          const output = entry.usage.output_tokens || 0;
-          const cacheRead = entry.usage.cache_read_input_tokens || entry.usage.cache_read || 0;
-          const cacheCreate = entry.usage.cache_creation_input_tokens || entry.usage.cache_creation || 0;
+          const model = msg.model || entry.model || 'claude-unknown';
+          const input = usage.input_tokens || 0;
+          const output = usage.output_tokens || 0;
+          const cacheRead = usage.cache_read_input_tokens || 0;
+          const cacheCreate = usage.cache_creation_input_tokens || 0;
           const totalInput = input + cacheRead + cacheCreate;
 
           const key = `${date}|${model}`;
@@ -329,21 +333,22 @@ function collectClaudeCodeLogs() {
     } catch { /* skip unreadable files */ }
   }
 
-  // Convert aggregates to records with cost estimates
+  // Convert aggregates to records — cost is ESTIMATED (local logs don't know billing path)
   Object.values(dayModel).forEach((agg) => {
     const pKey = Object.keys(ccPricing).find((k) => agg.model.toLowerCase().includes(k.replace(/-\d+$/, '')));
     const rates = pKey ? ccPricing[pKey] : { prompt: 0.000003, completion: 0.000015 };
-    const cost = agg.promptTokens * rates.prompt + agg.completionTokens * rates.completion;
+    const estimatedCost = agg.promptTokens * rates.prompt + agg.completionTokens * rates.completion;
 
     records.push({
       source: 'claude-code',
-      billingPath: 'anthropic-oauth',
+      billingPath: 'local-estimate',
+      estimated: true,  // local logs can't determine actual billing path or cost
       date: agg.date,
       model: agg.model.includes('/') ? agg.model : `anthropic/${agg.model}`,
       modelName: agg.model,
       promptTokens: agg.promptTokens,
       completionTokens: agg.completionTokens,
-      cost,
+      cost: estimatedCost,
       requests: agg.requests,
     });
   });
@@ -505,13 +510,47 @@ async function detectAndCollect(verbose) {
 
   process.stderr.write('\n');
 
+  // ── RECONCILIATION ──────────────────────────────────────────────
+  // API sources (OpenRouter, Anthropic Admin, OpenAI) report actual costs.
+  // Local logs only know token counts — cost is estimated.
+  // If any API source is present, local log records are kept for token/usage
+  // detail but their estimated costs are zeroed out so they don't inflate totals.
+  // If NO API source is present, local estimates are the only data we have
+  // and we keep them but label them clearly.
+  const hasApiSource = allRecords.some((r) => !r.estimated);
+
+  if (hasApiSource) {
+    let suppressedEstimate = 0;
+    allRecords.forEach((r) => {
+      if (r.estimated) {
+        suppressedEstimate += r.cost;
+        r.cost = 0; // zero out — API sources have the real cost
+        r.billingPath = 'local-usage-only';
+      }
+    });
+    if (suppressedEstimate > 0) {
+      process.stderr.write(`  ℹ Local log cost estimates (~${fmtMoney(suppressedEstimate)}) suppressed —\n`);
+      process.stderr.write(`    API sources provide actual billing data.\n`);
+      process.stderr.write(`    Local logs retained for token counts and usage patterns.\n\n`);
+    }
+  } else {
+    // No API sources — local estimates are all we have
+    const estTotal = allRecords.reduce((s, r) => s + (r.estimated ? r.cost : 0), 0);
+    if (estTotal > 0) {
+      process.stderr.write(`  ⚠ No API keys found. Showing estimated costs (~${fmtMoney(estTotal)}) from local logs.\n`);
+      process.stderr.write(`    These are rough estimates based on published per-token pricing.\n`);
+      process.stderr.write(`    Actual costs depend on your billing method (subscription, OpenRouter, etc.).\n`);
+      process.stderr.write(`    Set OPENROUTER_API_KEY or ANTHROPIC_ADMIN_KEY for accurate billing data.\n\n`);
+    }
+  }
+
   if (allRecords.length === 0) {
     process.stderr.write('  No data found from any source.\n');
     process.stderr.write('  Set at least one API key or use a CLI tool to generate data.\n\n');
     process.exit(0);
   }
 
-  return { records: allRecords, sources, pricing: allPricing };
+  return { records: allRecords, sources, pricing: allPricing, hasApiSource };
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -620,7 +659,7 @@ function escapeHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&l
 // ═══════════════════════════════════════════════════════════════════
 // HTML DASHBOARD
 // ═══════════════════════════════════════════════════════════════════
-function generateDashboard(data, sources) {
+function generateDashboard(data, sources, allEstimated = false) {
   const colors = ['#c084fc','#60a5fa','#34d399','#f472b6','#fbbf24','#fb923c','#a78bfa','#38bdf8','#4ade80','#f87171','#facc15','#e879f9'];
   const top6 = data.modelRanking.slice(0, 6);
   const maxCost = top6[0]?.cost || 1;
@@ -719,6 +758,11 @@ td.mono{font-family:'SF Mono','Fira Code',monospace}
   <div class="header-meta">Report generated ${new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}<br>${sources.length} data source${sources.length!==1?'s':''} detected</div>
 </div>
 <div class="sources-bar">${sourceTagsHTML}</div>
+${allEstimated ? `<div style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#fbbf24">
+  <strong>⚠ Estimated costs</strong> — No API keys found. Costs below are rough estimates based on published per-token pricing.
+  Your actual costs depend on your billing method (subscription, OpenRouter rates, etc.).
+  Set <code style="background:rgba(251,191,36,0.15);padding:2px 6px;border-radius:3px">OPENROUTER_API_KEY</code> for accurate billing data.
+</div>` : ''}
 ${hasData ? `
 <div class="kpi-grid">
   <div class="kpi"><div class="kpi-label">Total Spend (30d)</div><div class="kpi-value">${fmtMoney(data.totalCost)}</div><div class="kpi-sub">${fmtTokens(data.totalPromptTokens+data.totalCompletionTokens)} tokens across all sources</div></div>
@@ -750,7 +794,10 @@ ${hasData ? `
     </div>
   </div>
 </div>` : `<div class="empty-state"><h2>No usage data found</h2><p>No activity detected from any source in the last 30 days.</p></div>`}
-<div class="footer">Each billing path (${Object.keys(data.bySource).map(escapeHtml).join(', ') || 'none'}) represents a separate bill. OpenRouter calls and direct API calls are never double-counted. Local CLI log costs are estimates based on published pricing. Generated by Tokenmiser v${VERSION}.</div>
+<div class="footer">${allEstimated
+  ? `⚠ All costs shown are estimates from local token logs. Set API keys for real billing data.`
+  : `Costs from API sources (${Object.keys(data.bySource).filter(p => p !== 'local-usage-only').map(escapeHtml).join(', ') || 'none'}) are actual billing data. Local log entries provide token counts only — their costs are not included in totals when API data is available.`
+} Generated by Tokenmiser v${VERSION}.</div>
 </div></body></html>`;
 }
 
@@ -775,22 +822,27 @@ async function main() {
   if (opts.help) { printHelp(); process.exit(0); }
 
   try {
-    const { records, sources, pricing } = await detectAndCollect(opts.verbose);
+    const { records, sources, pricing, hasApiSource } = await detectAndCollect(opts.verbose);
     const data = aggregate(records, pricing);
+    const allEstimated = !hasApiSource && records.some((r) => r.estimated);
 
     if (opts.json) {
-      console.log(JSON.stringify({ sources, ...data, fetchedAt: new Date().toISOString() }, null, 2));
+      console.log(JSON.stringify({ sources, ...data, allEstimated, fetchedAt: new Date().toISOString() }, null, 2));
       return;
     }
 
-    const html = generateDashboard(data, sources);
+    const html = generateDashboard(data, sources, allEstimated);
     fs.writeFileSync(OUTPUT_FILE, html, 'utf8');
 
     // Terminal summary
+    const costPrefix = allEstimated ? '~' : '';
     console.log(`  ╔═══════════════════════════════════════════════════════╗`);
     console.log(`  ║  TOKENMISER v${VERSION}                                    ║`);
     console.log(`  ╚═══════════════════════════════════════════════════════╝`);
-    console.log(`  Total Spend (30d):    ${fmtMoney(data.totalCost)}`);
+    if (allEstimated) {
+      console.log(`  ⚠ ESTIMATED — no API keys set. Set OPENROUTER_API_KEY for real billing data.`);
+    }
+    console.log(`  Total Spend (30d):    ${costPrefix}${fmtMoney(data.totalCost)}`);
     console.log(`  Billing Paths:        ${Object.keys(data.bySource).join(', ')}`);
     console.log(`  Active Models:        ${data.activeModels}`);
     console.log(`  Total Requests:       ${data.totalRequests.toLocaleString()}`);
