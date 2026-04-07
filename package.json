@@ -1,7 +1,7 @@
 {
   "name": "tokenmiser",
-  "version": "2.0.0",
-  "description": "See where your AI API money goes. Point it at your OpenRouter account, get a cost dashboard in 30 seconds.",
+  "version": "3.0.0",
+  "description": "Auto-detect AI API spending across billing sources. Supports Claude Code logs, OpenRouter CSV imports, and deduplication.",
   "bin": {
     "tokenmiser": "./cli.js"
   },
