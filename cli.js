@@ -65,6 +65,8 @@ function parseArgs() {
     else if (args[i] === '--add-budget') opts.addBudget = true;
     else if (args[i] === '--list') opts.list = true;
     else if (args[i] === '--remove' && args[i + 1]) opts.remove = args[++i];
+    else if (args[i] === '--quick-sub' && args[i + 1]) { opts.quickSub = args[++i]; opts.config = true; }
+    else if (args[i] === '--account' && args[i + 1]) opts.account = args[++i];
   }
   return opts;
 }
@@ -81,13 +83,21 @@ function printHelp() {
     tokenmiser --csv FILE             Import OpenRouter activity CSV export
 
   Config (persistent settings):
-    tokenmiser config --add-sub       Add a subscription (interactive)
+    tokenmiser config --add-sub       Add a subscription (interactive, with templates)
     tokenmiser config --add-budget    Add a budget alert (interactive)
     tokenmiser config --list          List subscriptions and budgets
     tokenmiser config --remove ID     Remove a subscription or budget by ID
+    tokenmiser --quick-sub TEMPLATE   Quick-add subscription (e.g. claude-pro, copilot-individual)
+    tokenmiser --quick-sub TEMPLATE --account "Work"  Quick-add with account label
+
+  Quick-add templates:
+    claude-pro, claude-max, claude-max-20x, chatgpt-plus, chatgpt-pro,
+    gemini-advanced, copilot-individual, copilot-business, copilot-enterprise,
+    cursor-pro, cursor-business
 
   Auto-detected sources (via environment variables):
-    OPENROUTER_API_KEY                OpenRouter activity (last 30 days)
+    OPENROUTER_API_KEY                OpenRouter key usage summary
+    OPENROUTER_MANAGEMENT_KEY         OpenRouter full activity (optional upgrade)
     ANTHROPIC_ADMIN_KEY               Anthropic Usage + Cost API (org admin key)
     OPENAI_ADMIN_KEY / OPENAI_API_KEY OpenAI Usage + Cost API (admin key)
 
@@ -96,12 +106,21 @@ function printHelp() {
     ~/.codex/sessions/                Codex CLI session transcripts
     VS Code globalStorage             Cline extension task history
     ~/.aider.chat.history.md          Aider chat logs (per-project)
+    ~/.gemini/                        Gemini CLI session logs (experimental)
+    Cursor state.vscdb                Cursor IDE usage (experimental, needs sqlite3)
 
   Subscription tracking (~/.tokenmiser/config.json):
     Claude Pro, Max 5x, Max 20x      Fixed monthly cost
     ChatGPT Plus, Pro, Team           Fixed monthly cost
     Gemini Advanced                   Fixed monthly cost
+    GitHub Copilot Individual/Biz/Ent Fixed monthly cost
+    Cursor Pro, Business              Fixed monthly cost
     Any custom plan                   Manual entry
+
+  Unsupported sources (documented limitations):
+    GitHub Copilot usage API          Requires org admin token (most users don't have)
+    Google Vertex AI                  Requires GCP service account + Cloud Monitoring
+    Google AI Studio                  No programmatic usage API exists
 
   Each source is a separate billing path. Using Claude Desktop
   (OAuth) and Claude via OpenRouter are two different bills —
@@ -142,8 +161,10 @@ async function main() {
   }
 
   // ── Config subcommands ──
-  if (opts.config || opts.addSub || opts.addBudget || opts.list || opts.remove) {
-    if (opts.addSub) {
+  if (opts.config || opts.addSub || opts.addBudget || opts.list || opts.remove || opts.quickSub) {
+    if (opts.quickSub) {
+      config.quickAddSubscription(opts.quickSub, opts.account || 'Personal');
+    } else if (opts.addSub) {
       await config.interactiveAddSubscription();
     } else if (opts.addBudget) {
       await config.interactiveAddBudget();
