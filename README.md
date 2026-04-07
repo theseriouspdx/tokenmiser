@@ -18,7 +18,7 @@ npm install -g tokenmiser
 Or run directly from the repo:
 
 ```bash
-git clone https://github.com/jserious/tokenmiser.git
+git clone https://github.com/theseriouspdx/tokenmiser.git
 cd tokenmiser
 node cli.js
 ```
