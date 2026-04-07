@@ -33,6 +33,7 @@ const { getSubscriptionRecords, getTotalSubscriptionCost } = require('./lib/subs
 const { generateDashboard } = require('./lib/dashboard');
 const config = require('./lib/config');
 const { detectSubscriptions } = require('./lib/auto-subscriptions');
+const { startServer } = require('./lib/server');
 
 const VERSION = '4.0.0';
 const OUTPUT_FILE = path.join(process.cwd(), 'tokenmiser-report.html');
@@ -68,6 +69,7 @@ function parseArgs() {
     else if (args[i] === '--remove' && args[i + 1]) opts.remove = args[++i];
     else if (args[i] === '--quick-sub' && args[i + 1]) { opts.quickSub = args[++i]; opts.config = true; }
     else if (args[i] === '--account' && args[i + 1]) opts.account = args[++i];
+    else if (args[i] === '--no-server') opts.noServer = true;
   }
   return opts;
 }
@@ -289,8 +291,23 @@ async function main() {
     }
 
     console.log(`\n  Dashboard: ${OUTPUT_FILE}`);
-    const opened = openInBrowser(OUTPUT_FILE);
-    console.log(opened ? `  Opened in browser.\n` : `  Open the file above in your browser.\n`);
+
+    // Start the dashboard server (non-blocking)
+    if (!opts.noServer) {
+      try {
+        const { url } = await startServer(html);
+        console.log(`  Server:    ${url} (auto-stops after 30m idle)`);
+        const opened = openInBrowser(url);
+        console.log(opened ? `  Opened in browser.\n` : `  Open the URL above in your browser.\n`);
+      } catch (serverErr) {
+        // Server failed to start — fall back to file-based dashboard
+        const opened = openInBrowser(OUTPUT_FILE);
+        console.log(opened ? `  Opened in browser.\n` : `  Open the file above in your browser.\n`);
+      }
+    } else {
+      const opened = openInBrowser(OUTPUT_FILE);
+      console.log(opened ? `  Opened in browser.\n` : `  Open the file above in your browser.\n`);
+    }
   } catch (err) {
     console.error(`\n  Error: ${err.message}\n`);
     if (process.env.TOKENMISER_DEBUG) console.error(err.stack);
