@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * tokenmiser CLI v4.0.0 — see where your AI API money goes.
+ * tokenmiser CLI v4.1.0 — see where your AI API money goes.
  *
  * Auto-detects every data source on your machine:
  *   - OpenRouter API (via OPENROUTER_API_KEY)
@@ -35,7 +35,7 @@ const config = require('./lib/config');
 const { detectSubscriptions } = require('./lib/auto-subscriptions');
 const { startServer } = require('./lib/server');
 
-const VERSION = '4.0.0';
+const VERSION = '4.1.0';
 const OUTPUT_FILE = path.join(process.cwd(), 'tokenmiser-report.html');
 
 // ═══════════════════════════════════════════════════════════════════
